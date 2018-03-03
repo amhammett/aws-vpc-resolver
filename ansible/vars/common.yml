@@ -1,0 +1,18 @@
+---
+
+platform: resolver
+
+vpc_lookup:
+  default: dev
+
+dyn_vpc_lookup: "{{vpc_lookup['env']|default(vpc_lookup['default'])}}"
+
+service:
+  dns:
+    port_exposed:
+      default: 53
+    disk_size:
+      default: 10
+
+dyn_dns_port_exposed:  "{{service['dns']['port_exposed'][env]|default(service['dns']['port_exposed']['default'])}}"
+dyn_dns_disk_size:     "{{service['dns']['disk_size'][env]|default(service['dns']['disk_size']['default'])}}"
