@@ -1,0 +1,11 @@
+---
+- name: Terminate Resolver stack
+  hosts: localhost
+
+  connection: local
+
+  vars_files:
+    - ./vars/common.yml
+
+  roles:
+    - { role: 'resolver-terminate', ec2_role: 'dns' }
