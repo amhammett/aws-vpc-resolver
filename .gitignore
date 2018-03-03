@@ -1,0 +1,16 @@
+
+# development
+*.swp
+
+# environment
+.env
+venv
+.venv
+
+# ansible
+.ansible
+*.retry
+
+# OS
+.DS_Store
+.tmp
