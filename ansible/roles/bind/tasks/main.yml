@@ -1,0 +1,47 @@
+---
+- name: install bind
+  apt:
+    name:  "{{item}}"
+    state:  installed
+    update_cache: yes
+  become: yes
+  with_items:
+    - bind9
+    - bind9utils
+    - bind9-doc
+
+- name: lookup vpc
+  ec2_vpc_net_facts:
+    filters:
+      "tag:Environment": "{{dyn_vpc_lookup}}"
+  delegate_to: localhost
+  register:  ec2_vpc_facts
+
+- name: aws vpc dns is cidr+2
+  set_fact: vpc_dns="{{ec2_vpc_facts.vpcs[0].cidr_block|ipaddr(2)|ipaddr('address')}}"
+
+- name: bind options
+  template:
+    src:  "{{item.f}}.j2"
+    dest: "{{item.p}}/{{item.f}}"
+  become: yes
+  register: template_bind
+  with_items:
+    - { f: 'named.conf.options', p: '/etc/bind/' }
+
+- name: reload service
+  service:
+    name:  bind9
+    state: restarted
+  become: yes
+  when: template_bind|changed
+
+- name: ensure service running
+  service:
+    name:  bind9
+    state: started
+  become: yes
+
+- name: verify service is running
+  shell: "ps aux | grep [b]ind"
+  changed_when: false

@@ -1,0 +1,35 @@
+---
+- name: Resolver Stack
+  hosts: localhost
+
+  connection: local
+
+  vars_files:
+    - ./vars/common.yml
+
+  roles:
+    - { role: 'resolver-stack', ec2_role: 'dns' }
+
+- name: Configure Stack
+  hosts: "tag_platform_resolver:&tag_service_dns:&tag_environment_{{env}}"
+
+  gather_facts: false
+
+  vars_files:
+    - ./vars/common.yml
+
+  pre_tasks:
+    - name: python2.7 status
+      raw: /usr/bin/python --version
+      changed_when: false
+      ignore_errors: true
+      register: raw_python
+    - name: install python 2.7
+      raw: test -e /usr/bin/python || (apt -y update && apt install -y python-minimal)
+      become: yes
+      when: raw_python|failed
+    - name: gather facts
+      setup:
+
+  roles:
+    - bind

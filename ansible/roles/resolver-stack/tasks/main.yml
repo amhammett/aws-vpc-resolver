@@ -1,0 +1,99 @@
+---
+- name: create ssh key
+  user:
+    name:             "{{lookup('env', 'USER')}}"
+    generate_ssh_key: yes
+    ssh_key_bits:     2048
+    ssh_key_file:     ".ssh/id_rsa-{{platform}}-{{env}}"
+
+- name: ec2 key
+  ec2_key:
+    name:         "{{platform}}-{{env}}"
+    key_material: "{{item}}"
+  with_file: "~/.ssh/id_rsa-{{platform}}-{{env}}.pub"
+
+- name: lookup vpc
+  ec2_vpc_net_facts:
+    filters:
+      "tag:Environment": "{{dyn_vpc_lookup}}"
+  register: ec2_vpc_facts
+
+- name: lookup subnets
+  ec2_vpc_subnet_facts:
+    filters:
+      vpc-id: "{{ec2_vpc_facts.vpcs[0].id}}"
+  register: ec2_subnet_facts
+
+- name: ubuntu 16 ami
+  ec2_ami_find:
+    name:       "ubuntu/images/hvm-ssd/ubuntu-xenial-16.04-amd64-server-*"
+    owner:      099720109477
+    sort:       name
+    sort_order: descending
+    sort_end:   1
+  register: ami_find
+
+- name: default security group rules
+  set_fact:
+    security_group_rules: []
+
+- name: add rules for app ports
+  set_fact:
+    security_group_rules: "{{security_group_rules}} + [ { 'proto': '{{dyn_role_port_protocol}}', 'from_port': '{{dyn_role_port_exposed}}', 'to_port': '{{dyn_role_port_exposed}}', 'cidr_ip': '{{item|ipsubnet(16)}}' } ]"
+  with_items: "{{ansible_all_ipv4_addresses}}"
+
+- name: add rules for ssh
+  set_fact:
+    security_group_rules: "{{security_group_rules}} + [ { 'proto': 'tcp', 'from_port': '22', 'to_port': '22', 'cidr_ip': '{{item|ipsubnet(16)}}' } ]"
+  with_items: "{{ansible_all_ipv4_addresses}}"
+
+- name: security group
+  ec2_group:
+    name:        "{{platform}}-{{env}}-{{ec2_role}}"
+    description: "{{platform}} {{ec2_role}} access for {{env}}"
+    vpc_id:      "{{ec2_vpc_facts.vpcs[0].id}}"
+    rules:       "{{security_group_rules}}"
+
+- name: lookup ec2 instance
+  ec2_remote_facts:
+    filters:
+      instance-state-name: running
+      "tag:environment":   "{{env}}"
+      "tag:platform":      "{{platform}}"
+      "tag:service":       "{{ec2_role}}"
+  register: ec2_facts
+
+- name: ec2 instance
+  ec2:
+    key_name:         "{{platform}}-{{env}}"
+    group:            "{{platform}}-{{env}}-{{ec2_role}}"
+    instance_type:    t2.nano
+    image:            "{{ami_find.results[0].ami_id}}"
+    wait:             yes
+    instance_tags:
+       environment: "{{env}}"
+       platform:    "{{platform}}"
+       service:     "{{ec2_role}}"
+       name:        "{{platform}}-{{env}}-{{ec2_role}}"
+    volumes:
+      - device_name:           /dev/sda1
+        volume_size:           "{{dyn_role_disk_size}}"
+        delete_on_termination: true
+    vpc_subnet_id:    "{{ec2_subnet_facts|json_query('subnets[*].id')|random}}"
+    assign_public_ip: no
+  register: ec2_instance
+  when: ec2_facts.instances|length < 1
+
+- name: clear cache
+  shell: "AWS_PROFILE={{lookup('env','AWS_PROFILE')}} ./inventory/ec2.py --refresh-cache"
+  when: ec2_instance|changed
+
+- name: refresh meta
+  meta: refresh_inventory
+
+- name: wait for host to be available
+  wait_for:
+    host:    "{{ec2_instance[0].private_ip}}"
+    port:    22
+    timeout: 60
+  when: ec2_instance|changed
